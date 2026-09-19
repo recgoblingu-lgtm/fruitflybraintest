@@ -3,38 +3,405 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FlyBrain Connectome 3D Simulator</title>
+    <title>Drosophila Connectome - Brainwave & Behavioral Simulation</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #05050a; font-family: system-ui, -apple-system, sans-serif; }
+        body { margin: 0; overflow: hidden; background-color: #030307; font-family: system-ui, -apple-system, sans-serif; }
         canvas { display: block; }
     </style>
 </head>
 <body class="text-white select-none">
 
-    <!-- UI Overlay -->
-    <div class="absolute top-0 left-0 p-6 z-10 pointer-events-none max-w-md">
-        <div class="bg-black/60 backdrop-blur-md border border-cyan-500/30 p-5 rounded-2xl shadow-2xl pointer-events-auto">
-            <div class="flex items-center gap-3 mb-3">
-                <span class="inline-block w-3 h-3 bg-cyan-400 rounded-full animate-ping"></span>
-                <h1 class="text-xl font-bold tracking-wider text-cyan-400">Drosophila Connectome</h1>
+    <!-- HUD Overlay: Main Controls -->
+    <div class="absolute top-0 left-0 p-6 z-10 pointer-events-none max-w-sm">
+        <div class="bg-black/70 backdrop-blur-md border border-cyan-500/40 p-5 rounded-2xl shadow-2xl pointer-events-auto">
+            <div class="flex items-center gap-3 mb-2">
+                <span class="inline-block w-3 h-3 bg-emerald-400 rounded-full animate-ping"></span>
+                <h1 class="text-lg font-bold tracking-wider text-cyan-400">FlyBrain Connectome v2.5</h1>
             </div>
-            <p class="text-xs text-gray-300 leading-relaxed mb-4">
-                This simulation uses real structural logic derived from fruit fly connectome projects (FlyWire/CNS). Spikes propagate from central brain command clusters directly into the locomotor mechanics, steering the 3D fly model in real-time.
+            <p class="text-[11px] text-gray-300 leading-relaxed mb-4">
+                Real-time simulation modeling sensory-to-motor pathways, featuring live 3D brainwave node firing metrics in the corner viewport.
             </p>
             <div class="grid grid-cols-2 gap-2 text-xs mb-4">
                 <div class="bg-white/5 p-2 rounded border border-white/10">
-                    <span class="text-gray-400 block">Active Neurons</span>
-                    <span id="neuron-count" class="text-lg font-mono font-bold text-cyan-300">23,210</span>
+                    <span class="text-gray-400 block text-[10px]">Behavior State</span>
+                    <span id="behavior-state" class="text-xs font-mono font-bold text-cyan-300">Wandering / Foraging</span>
                 </div>
                 <div class="bg-white/5 p-2 rounded border border-white/10">
-                    <span class="text-gray-400 block">Neural State</span>
-                    <span id="brain-state" class="text-sm font-mono font-bold text-emerald-400">Foraging / Cruise</span>
+                    <span class="text-gray-400 block text-[10px]">Neural Firing Rate</span>
+                    <span id="neural-rate" class="text-xs font-mono font-bold text-emerald-400">14.2 Hz</span>
                 </div>
             </div>
             <div class="flex flex-col gap-2">
-                <button id="stimulate-btn" class="w-full py-2.5 px-4 bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg shadow-cyan-500/20 cursor-pointer">
+                <button id="spawn-food-btn" class="w-full py-2 px-3 bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg shadow-cyan-500/20 cursor-pointer">
+                    🍎 Drop Sugar Droplet
+                </button>
+                <button id="startle-btn" class="w-full py-2 px-3 bg-red-500/20 hover:bg-red-500/40 text-red-300 border border-red-500/50 font-medium text-xs rounded-xl transition-all cursor-pointer">
+                    ⚡ Startle / Air-Puff Stimulus
+                </button>
+                <button id="toggle-cam" class="w-full py-1.5 px-3 bg-white/10 hover:bg-white/20 text-white font-medium text-[11px] rounded-xl transition-all border border-white/10 cursor-pointer">
+                    Toggle Camera View
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- HUD Overlay: Active 3D Brainwave Viewport (Top Right Corner) -->
+    <div class="absolute top-6 right-6 z-10 pointer-events-none">
+        <div class="bg-black/80 backdrop-blur-md border border-cyan-500/50 p-3 rounded-2xl shadow-2xl pointer-events-auto flex flex-col items-center">
+            <div class="flex items-center justify-between w-full mb-2 px-1">
+                <span class="text-[10px] font-mono tracking-wider text-cyan-400 uppercase font-bold">Active 3D Brainwaves</span>
+                <span class="inline-block w-2 h-2 bg-cyan-400 rounded-full animate-pulse"></span>
+            </div>
+            <!-- Mini Canvas Container for 3D Brainwave Nodes -->
+            <div id="brainwave-mini-container" class="w-48 h-36 rounded-lg overflow-hidden bg-[#050510] border border-cyan-500/20 relative"></div>
+            <span id="brainwave-status" class="text-[9px] font-mono text-gray-400 mt-2">Central Complex: Stable</span>
+        </div>
+    </div>
+
+    <div class="absolute bottom-4 right-4 z-10 pointer-events-none text-right">
+        <p class="text-[10px] text-gray-500 font-mono">ENGINE: THREE.JS | CONNECTOME PIPELINE</p>
+    </div>
+
+    <!-- Main Viewport Container -->
+    <div id="canvas-container" class="w-screen h-screen"></div>
+
+    <script>
+        // --- SCENE & MAIN SETUP ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x030307, 0.02);
+
+        const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 18, 22);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        // --- MINI 3D BRAINWAVE VIEWER SETUP ---
+        const miniContainer = document.getElementById('brainwave-mini-container');
+        const miniScene = new THREE.Scene();
+        const miniCamera = new THREE.PerspectiveCamera(45, 192 / 144, 0.1, 100);
+        miniCamera.position.set(0, 0, 5);
+
+        const miniRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        miniRenderer.setSize(192, 144);
+        miniRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        miniContainer.appendChild(miniRenderer.domElement);
+
+        // Create 3D Brainwave Node Mesh inside Mini Scene
+        const brainwaveGroup = new THREE.Group();
+        const nodeGeo = new THREE.SphereGeometry(0.06, 8, 8);
+        const nodeMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+        const lineMat = new THREE.LineBasicMaterial({ color: 0x00f3ff, transparent: true, opacity: 0.4 });
+
+        const brainNodes = [];
+        const numNodes = 25;
+        for(let i = 0; i < numNodes; i++) {
+            const mesh = new THREE.Mesh(nodeGeo, nodeMat);
+            mesh.position.set(
+                (Math.random() - 0.5) * 2.2,
+                (Math.random() - 0.5) * 1.5,
+                (Math.random() - 0.5) * 1.5
+            );
+            brainwaveGroup.add(mesh);
+            brainNodes.push(mesh);
+        }
+
+        // Connect nodes with lines for a neural network look
+        const connectionsGeo = new THREE.BufferGeometry();
+        const positions = [];
+        for(let i = 0; i < numNodes; i++) {
+            for(let j = i + 1; j < numNodes; j++) {
+                if(brainNodes[i].position.distanceTo(brainNodes[j].position) < 1.2) {
+                    positions.push(brainNodes[i].position.x, brainNodes[i].position.y, brainNodes[i].position.z);
+                    positions.push(brainNodes[j].position.x, brainNodes[j].position.y, brainNodes[j].position.z);
+                }
+            }
+        }
+        connectionsGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        const connectLines = new THREE.LineSegments(connectionsGeo, lineMat);
+        brainwaveGroup.add(connectLines);
+        miniScene.add(brainwaveGroup);
+
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xccffff, 1.2);
+        dirLight.position.set(20, 40, 20);
+        scene.add(dirLight);
+
+        const groundGrid = new THREE.GridHelper(100, 50, 0x00ffff, 0x111122);
+        groundGrid.position.y = -2;
+        scene.add(groundGrid);
+
+        // --- DETAILED 3D FLY MODEL ---
+        const flyGroup = new THREE.Group();
+
+        const chitinMat = new THREE.MeshStandardMaterial({ color: 0x1a1c23, roughness: 0.2, metalness: 0.7 });
+        const eyeMat = new THREE.MeshStandardMaterial({ color: 0xcc0033, roughness: 0.1, metalness: 0.9, emissive: 0x330000 });
+        const wingMat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, transparent: true, opacity: 0.25, roughness: 0.05, transmission: 0.95 });
+        const brainMeshMat = new THREE.MeshBasicMaterial({ color: 0x00f3ff, wireframe: true });
+        const proboscisMat = new THREE.MeshStandardMaterial({ color: 0x88bbcc, roughness: 0.4 });
+
+        // Thorax
+        const thorax = new THREE.Mesh(new THREE.SphereGeometry(1.2, 16, 16), chitinMat);
+        thorax.scale.set(1, 0.85, 1.3);
+        flyGroup.add(thorax);
+
+        // Abdomen
+        const abdomen = new THREE.Mesh(new THREE.ConeGeometry(0.9, 3, 16), chitinMat);
+        abdomen.rotation.x = Math.PI / 2.2;
+        abdomen.position.set(0, -0.2, -2.1);
+        flyGroup.add(abdomen);
+
+        // Head & Visible Brain Node inside
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.85, 16, 16), chitinMat);
+        head.position.set(0, 0.15, 1.4);
+        flyGroup.add(head);
+
+        const brainNode = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.35, 0.4), brainMeshMat);
+        brainNode.position.set(0, 0.3, 1.4);
+        flyGroup.add(brainNode);
+
+        // Compound Eyes
+        const lEye = new THREE.Mesh(new THREE.SphereGeometry(0.38, 12, 12), eyeMat);
+        lEye.position.set(0.7, 0.3, 1.6);
+        const rEye = lEye.clone();
+        rEye.position.set(-0.7, 0.3, 1.6);
+        flyGroup.add(lEye, rEye);
+
+        // Proboscis
+        const proboscis = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.03, 1.0, 8), proboscisMat);
+        proboscis.position.set(0, -0.6, 1.7);
+        proboscis.rotation.x = -Math.PI / 4;
+        proboscis.visible = false;
+        flyGroup.add(proboscis);
+
+        // Wings
+        const wingGeo = new THREE.BoxGeometry(3.6, 0.02, 1.0);
+        wingGeo.translate(1.8, 0, 0);
+        const lWing = new THREE.Mesh(wingGeo, wingMat);
+        lWing.position.set(0.4, 0.8, 0.3);
+        const rWing = new THREE.Mesh(wingGeo, wingMat);
+        rWing.position.set(-0.4, 0.8, 0.3);
+        rWing.rotation.y = Math.PI;
+        flyGroup.add(lWing, rWing);
+
+        // Legs
+        const legMat = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 1.5 });
+        for(let i = 0; i < 3; i++) {
+            const zOffset = 0.5 - i * 0.5;
+            const lPts = [new THREE.Vector3(0.6, -0.4, zOffset), new THREE.Vector3(1.5, -1.5, zOffset + 0.2), new THREE.Vector3(2.0, -1.8, zOffset)];
+            const rPts = [new THREE.Vector3(-0.6, -0.4, zOffset), new THREE.Vector3(-1.5, -1.5, zOffset + 0.2), new THREE.Vector3(-2.0, -1.8, zOffset)];
+            flyGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(lPts), legMat));
+            flyGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(rPts), legMat));
+        }
+
+        scene.add(flyGroup);
+        flyGroup.position.y = 1;
+
+        // --- FOOD ITEM SETUP ---
+        const foodGroup = new THREE.Group();
+        const foodMesh = new THREE.Mesh(
+            new THREE.SphereGeometry(0.8, 16, 16),
+            new THREE.MeshStandardMaterial({ color: 0xff3366, roughness: 0.2, emissive: 0x550022 })
+        );
+        foodGroup.add(foodMesh);
+        
+        const foodGlow = new THREE.Mesh(
+            new THREE.SphereGeometry(1.2, 16, 16),
+            new THREE.MeshBasicMaterial({ color: 0xff0055, transparent: true, opacity: 0.2 })
+        );
+        foodGroup.add(foodGlow);
+        foodGroup.position.set(12, -1.2, 5);
+        scene.add(foodGroup);
+
+        // --- SIMULATION BEHAVIOR STATES ---
+        let state = "WANDERING"; 
+        let targetPos = new THREE.Vector3(0, 2, 0);
+        let wanderAngle = 0;
+        let erraticTimer = 0;
+        let feedTimer = 0;
+
+        const stateText = document.getElementById('behavior-state');
+        const rateText = document.getElementById('neural-rate');
+        const brainwaveStatusText = document.getElementById('brainwave-status');
+
+        // UI Event Handlers
+        document.getElementById('spawn-food-btn').addEventListener('click', () => {
+            foodGroup.position.set(
+                (Math.random() - 0.5) * 20,
+                -1.2,
+                (Math.random() - 0.5) * 20
+            );
+            state = "SEEKING_FOOD";
+            stateText.innerText = "Target Detected (Olfactory)";
+            stateText.className = "text-xs font-mono font-bold text-amber-400";
+            brainwaveStatusText.innerText = "Olfactory Lobe: High Activation";
+            nodeMat.color.setHex(0xffaa00);
+        });
+
+        document.getElementById('startle-btn').addEventListener('click', () => {
+            state = "STARTLED";
+            erraticTimer = 90;
+            proboscis.visible = false;
+            stateText.innerText = "⚡ Escape Circuit Triggered";
+            stateText.className = "text-xs font-mono font-bold text-red-400 animate-pulse";
+            brainwaveStatusText.innerText = "Giant Fiber Pathway: SPIKING";
+            nodeMat.color.setHex(0xff3333);
+        });
+
+        let camMode = 0;
+        document.getElementById('toggle-cam').addEventListener('click', () => {
+            camMode = (camMode + 1) % 3;
+        });
+
+        // --- ANIMATION & NEURAL LOGIC LOOP ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            const time = clock.getElapsedTime();
+
+            let wingSpeed = 35;
+            let currentNeuralRate = 14.2;
+
+            // Animate 3D brainwave nodes in the corner viewport
+            brainwaveGroup.rotation.y = time * 0.8;
+            brainwaveGroup.rotation.x = Math.sin(time * 0.5) * 0.3;
+            
+            // Pulsate individual nodes based on brainwave frequency activity
+            brainNodes.forEach((node, idx) => {
+                const scaleFactor = 1 + Math.sin(time * (5 + idx % 4)) * 0.4;
+                node.scale.set(scaleFactor, scaleFactor, scaleFactor);
+            });
+
+            // Behavior State Machine Logic
+            if (state === "STARTLED") {
+                erraticTimer--;
+                wingSpeed = 85;
+                currentNeuralRate = 58.4;
+                
+                targetPos.x += Math.sin(time * 12) * 0.5;
+                targetPos.y = 5 + Math.cos(time * 15) * 1.5;
+                targetPos.z += Math.cos(time * 10) * 0.5;
+
+                if (erraticTimer <= 0) {
+                    state = "WANDERING";
+                    stateText.innerText = "Wandering / Foraging";
+                    stateText.className = "text-xs font-mono font-bold text-cyan-300";
+                    brainwaveStatusText.innerText = "Central Complex: Stable";
+                    nodeMat.color.setHex(0x00ffff);
+                }
+            } 
+            else if (state === "SEEKING_FOOD") {
+                wingSpeed = 45;
+                currentNeuralRate = 28.6;
+                
+                const dirToFood = new THREE.Vector3().subVectors(foodGroup.position, flyGroup.position);
+                const distance = dirToFood.length();
+
+                if (distance < 2.0) {
+                    state = "FEEDING";
+                    feedTimer = 180;
+                    proboscis.visible = true;
+                    stateText.innerText = "🍽️ Feeding / Proboscis Extended";
+                    stateText.className = "text-xs font-mono font-bold text-emerald-400";
+                    brainwaveStatusText.innerText = "Gustatory Circuit: Active";
+                    nodeMat.color.setHex(0x00ff66);
+                } else {
+                    targetPos.copy(foodGroup.position).add(new THREE.Vector3(0, 1.5, 0));
+                }
+            } 
+            else if (state === "FEEDING") {
+                wingSpeed = 15;
+                currentNeuralRate = 8.1;
+                feedTimer--;
+
+                flyGroup.position.y = -0.5 + Math.sin(time * 6) * 0.05;
+
+                if (feedTimer <= 0 || foodGroup.parent === null) {
+                    proboscis.visible = false;
+                    state = "WANDERING";
+                    stateText.innerText = "Wandering / Foraging";
+                    stateText.className = "text-xs font-mono font-bold text-cyan-300";
+                    brainwaveStatusText.innerText = "Central Complex: Stable";
+                    nodeMat.color.setHex(0x00ffff);
+                }
+            } 
+            else {
+                wanderAngle += delta * 0.7;
+                targetPos.x = Math.sin(wanderAngle) * 8;
+                targetPos.y = 2 + Math.cos(wanderAngle * 1.3) * 1.0;
+                targetPos.z = Math.cos(wanderAngle * 0.5) * 8;
+
+                if (foodGroup.position.distanceTo(flyGroup.position) < 12.0) {
+                    state = "SEEKING_FOOD";
+                    stateText.innerText = "Odor Gradient Detected";
+                    stateText.className = "text-xs font-mono font-bold text-amber-400";
+                    brainwaveStatusText.innerText = "Olfactory Lobe: Active";
+                    nodeMat.color.setHex(0xffaa00);
+                }
+            }
+
+            rateText.innerText = currentNeuralRate.toFixed(1) + " Hz";
+
+            // Flap wings
+            lWing.rotation.z = Math.sin(time * wingSpeed) * 0.45;
+            rWing.rotation.z = -Math.sin(time * wingSpeed) * 0.45;
+
+            // Move fly
+            if (state !== "FEEDING") {
+                flyGroup.position.lerp(targetPos, 0.04);
+                const lookTarget = targetPos.clone();
+                lookTarget.y = flyGroup.position.y;
+                flyGroup.lookAt(lookTarget);
+            }
+
+            // Camera Viewport Modes
+            if (camMode === 0) {
+                const camTargetPos = new THREE.Vector3(
+                    flyGroup.position.x,
+                    flyGroup.position.y + 4,
+                    flyGroup.position.z + 10
+                );
+                camera.position.lerp(camTargetPos, 0.06);
+                camera.lookAt(flyGroup.position);
+            } else if (camMode === 1) {
+                camera.position.set(flyGroup.position.x, flyGroup.position.y + 0.3, flyGroup.position.z + 0.8);
+                const lookForward = flyGroup.position.clone().add(new THREE.Vector3(0, 0, 10));
+                camera.lookAt(lookForward);
+            } else {
+                camera.position.x = Math.cos(time * 0.3) * 18;
+                camera.position.z = Math.sin(time * 0.3) * 18;
+                camera.position.y = 8;
+                camera.lookAt(0, 0, 0);
+            }
+
+            // Render both viewports
+            renderer.render(scene, camera);
+            miniRenderer.render(miniScene, miniCamera);
+        }
+
+        animate();
+
+        // Responsive window handling
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>                <button id="stimulate-btn" class="w-full py-2.5 px-4 bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg shadow-cyan-500/20 cursor-pointer">
                     ⚡ Trigger Giant Fiber (Escape)
                 </button>
                 <button id="toggle-cam-btn" class="w-full py-2 px-4 bg-white/10 hover:bg-white/20 text-white font-medium text-xs rounded-xl transition-all border border-white/10 cursor-pointer">
